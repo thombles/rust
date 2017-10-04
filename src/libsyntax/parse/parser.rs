@@ -984,8 +984,9 @@ impl<'a> Parser<'a> {
                                   -> PResult<'a, Vec<T>> where
         F: FnMut(&mut Parser<'a>) -> PResult<'a,  T>,
     {
-        let val = self.parse_seq_to_before_end(ket, sep, f);
+        let (result, val) = self.parse_seq_to_before_end(ket, sep, f);
         self.bump();
+        result?;
         Ok(val)
     }
 
@@ -996,10 +997,21 @@ impl<'a> Parser<'a> {
                                          ket: &token::Token,
                                          sep: SeqSep,
                                          f: F)
-                                         -> Vec<T>
+                                         -> (PResult<'a, ()>, Vec<T>)
         where F: FnMut(&mut Parser<'a>) -> PResult<'a,  T>
     {
-        self.parse_seq_to_before_tokens(&[ket], sep, TokenExpectType::Expect, f, |mut e| e.emit())
+        let mut err: Option<DiagnosticBuilder> = None;
+        let val = self.parse_seq_to_before_tokens(&[ket], sep, TokenExpectType::Expect, f, |mut e| {
+            e.emit();
+            if err.is_none() {
+                err = Some(e);
+            }
+        });
+        // Return the array of results, indicating whether an error occurred
+        match err {
+            None => (Ok(()), val),
+            Some(e) => (Err(e), val)
+        }
     }
 
     // `fe` is an error handler.
@@ -1011,7 +1023,7 @@ impl<'a> Parser<'a> {
                                             mut fe: Fe)
                                             -> Vec<T>
         where F: FnMut(&mut Parser<'a>) -> PResult<'a,  T>,
-              Fe: FnMut(DiagnosticBuilder)
+              Fe: FnMut(DiagnosticBuilder<'a>)
     {
         let mut first: bool = true;
         let mut v = vec![];
@@ -1063,11 +1075,14 @@ impl<'a> Parser<'a> {
         F: FnMut(&mut Parser<'a>) -> PResult<'a,  T>,
     {
         self.expect(bra)?;
-        let result = self.parse_seq_to_before_end(ket, sep, f);
+        let (result, val) = self.parse_seq_to_before_end(ket, sep, f);
         if self.token == *ket {
             self.bump();
         }
-        Ok(result)
+        match result {
+            Ok(_) => Ok(val),
+            Err(e) => Err(e)
+        }
     }
 
     // NB: Do not use this function unless you actually plan to place the
@@ -1082,10 +1097,10 @@ impl<'a> Parser<'a> {
     {
         let lo = self.span;
         self.expect(bra)?;
-        let result = self.parse_seq_to_before_end(ket, sep, f);
+        let (_, val) = self.parse_seq_to_before_end(ket, sep, f);
         let hi = self.span;
         self.bump();
-        Ok(respan(lo.to(hi), result))
+        Ok(respan(lo.to(hi), val))
     }
 
     /// Advance the parser by one token
@@ -4721,14 +4736,14 @@ impl<'a> Parser<'a> {
             } else if self.eat(&token::Comma) {
                 let mut fn_inputs = vec![self_arg];
                 fn_inputs.append(&mut self.parse_seq_to_before_end(
-                    &token::CloseDelim(token::Paren), sep, parse_arg_fn)
+                    &token::CloseDelim(token::Paren), sep, parse_arg_fn).1
                 );
                 fn_inputs
             } else {
                 return self.unexpected();
             }
         } else {
-            self.parse_seq_to_before_end(&token::CloseDelim(token::Paren), sep, parse_arg_fn)
+            self.parse_seq_to_before_end(&token::CloseDelim(token::Paren), sep, parse_arg_fn).1
         };
 
         // Parse closing paren and return type.
