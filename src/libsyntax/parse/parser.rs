@@ -1003,7 +1003,7 @@ impl<'a> Parser<'a> {
                                          -> ParseSeqResult<'a,  T>
         where F: FnMut(&mut Parser<'a>) -> PResult<'a,  T>
     {
-        self.parse_seq_to_before_tokens(&[ket], sep, TokenExpectType::Expect, f, |mut e| { e.emit(); println!("Hello"); })
+        self.parse_seq_to_before_tokens(&[ket], sep, TokenExpectType::Expect, f, |_| {})
     }
 
     // `fe` is an error handler.
@@ -1015,7 +1015,7 @@ impl<'a> Parser<'a> {
                                             mut fe: Fe)
                                             -> ParseSeqResult<'a,  T>
         where F: FnMut(&mut Parser<'a>) -> PResult<'a,  T>,
-              Fe: FnMut(DiagnosticBuilder)
+              Fe: FnMut(&mut DiagnosticBuilder)
     {
         let mut first: bool = true;
         let mut result = ParseSeqResult {
@@ -1031,10 +1031,9 @@ impl<'a> Parser<'a> {
                 if first {
                     first = false;
                 } else {
-                    if let Err(e) = self.expect(t) {
-                        fe(e);
-                        debug!("Error invalid separator");
-                        result.error = Some(self.span_fatal(self.prev_span, "Invalid separator"));
+                    if let Err(mut e) = self.expect(t) {
+                        fe(&mut e);
+                        result.error = Some(e);
                         break;
                     }
                 }
@@ -1050,10 +1049,9 @@ impl<'a> Parser<'a> {
 
             match f(self) {
                 Ok(t) => result.parsed.push(t),
-                Err(e) => {
-                    fe(e);
-                    debug!("Error invalid token");
-                    result.error = Some(self.span_fatal(self.prev_span, "Invalid token"));
+                Err(mut e) => {
+                    fe(&mut e);
+                    result.error = Some(e);
                     break;
                 }
             }
@@ -1075,7 +1073,6 @@ impl<'a> Parser<'a> {
     {
         self.expect(bra)?;
         let result = self.parse_seq_to_before_end(ket, sep, f);
-        debug!("Result from before_end {:?}", result.error);
         if self.token == *ket {
             self.bump();
         }
@@ -4767,7 +4764,7 @@ impl<'a> Parser<'a> {
                     SeqSep::trailing_allowed(token::Comma),
                     TokenExpectType::NoExpect,
                     |p| p.parse_fn_block_arg(),
-                    |mut e| e.emit()
+                    |e| e.emit()
                 ).parsed;
                 self.expect_or()?;
                 args
